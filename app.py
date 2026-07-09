@@ -105,16 +105,16 @@ st.markdown(
 )
 
 tab_summary, tab_projects, tab_taxa, tab_maps = st.tabs(
-    ["Summary", "Digitisation projects", "View progress by taxa", "Maps"]
+    ["Summary", "Projects", "Digitisation progress by taxa", "Maps"]
 )
 
 
 # ---- Tab: Summary -----------------------------------------------------------
 
 with tab_summary:
-    total_dig = int(dat.loc[dat["origin"] == "All", "digitised"].sum())
-    total_inv = int(dat.loc[dat["origin"] == "All", "inventory"].sum())
-    pct_dig = round(total_dig / total_inv * 100)
+    total_row = summary_tab.loc[summary_tab["Material type"] == "Total"].iloc[0]
+    total_dig = int(str(total_row["Digitised"]).replace(",", ""))
+    pct_dig = int(str(total_row["Proportion Digitised"]).replace("%", ""))
     total_imaged = 3307
 
     k1, k2, k3 = st.columns(3)
@@ -127,8 +127,8 @@ with tab_summary:
 
     st.subheader("New Zealand Arthropod Collection - Ko te Aitanga Pepeke o Aotearoa")
     st.markdown(
-        "The intent of this site is to show progress and projects that are part of "
-        "the digitisation program in the NZAC."
+        "The intent of this site is to summarise projects across "
+        "the New Zealand Arthropod Collection."
     )
     st.markdown(
         "The NZAC has the most complete coverage of terrestrial invertebrates in New "
@@ -177,10 +177,10 @@ with tab_summary:
             margin=dict(l=40, r=20, t=20, b=40),
             height=450,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     with table_col:
-        st.dataframe(summary_tab, hide_index=True, use_container_width=True, height=200)
+        st.dataframe(summary_tab, hide_index=True, width='stretch', height=200)
 
     st.markdown(
         'Created and maintained by <a href="https://www.landcareresearch.co.nz/about-us/our-people/aaron-harmer" '
@@ -194,22 +194,38 @@ with tab_summary:
 with tab_projects:
     img_col, text_col = st.columns([2, 3])
     with img_col:
-        st.image(str(ASSETS_DIR / "rapiid_lite.png"), width=350)
+        st.image(str(ASSETS_DIR / "rapiid_lite.png"), width=500)
     with text_col:
-        st.markdown(
-            "Digitising biological collections is essential for research and conservation "
-            "but remains slow and expensive, particularly for pinned insect specimens with "
-            "tiny, stacked labels. Current manual transcription methods in Australia and New "
-            "Zealand create a decadal bottleneck, while existing automated systems are costly "
-            "and space-intensive. We developed RAPIIDlite (RAked Pinned Insect Imaging Device), "
-            "a modular, semi-automated imaging system and associated processing pipeline that "
-            "dramatically accelerates specimen digitisation. The system combines customisable "
-            "hardware with user-friendly Python software and advanced machine learning. Images "
-            "are processed through GoogleVision OCR and spaCy natural language processing to "
-            "automatically extract and parse label data into standardised Darwin Core database "
-            "fields. Testing shows RAPIIDlite significantly speeds digitisation while improving "
-            "standardisation and reducing errors."
-        )
+        specimen_digitisation_overview = r"""
+        ## Transforming specimen labels into digital data
+        Natural history collections hold millions of physical specimens, each carrying handwritten or printed labels that record decades — sometimes centuries — of collecting effort. Turning that locked-away information into searchable, usable digital records has traditionally meant slow, error-prone manual transcription. This project takes on that bottleneck from two complementary angles: capturing better source images, and reading them intelligently.
+ 
+        ### RAPIIDlite — capturing the data at the source
+        RAPIIDlite is a desktop imaging application built for natural history collection digitisation workflows. It captures high-quality images of specimen labels using one or more cameras, decodes DataMatrix barcodes from accession labels on the fly, and automatically logs capture metadata to CSV and EXIF tags. No manual data entry is required at the imaging bench — every specimen is linked to its image and accession number the moment it's photographed.
+ 
+        ### Chrysalis — reading the labels with AI
+        Chrysalis picks up where imaging leaves off. It's a browser-based tool that uses AI vision to digitise entomological specimen labels: upload images of pinned insect specimens, and Chrysalis automatically reads the labels and parses out locality, collector, date, and other curatorial fields. The result is a clean CSV ready to import straight into a collection management system, with human review built in to catch anything the model gets wrong.
+ 
+        ### One workflow, start to finish
+        Together, RAPIIDlite and Chrysalis form an end-to-end pipeline for moving physical specimen data into digital form: RAPIIDlite handles fast, accurate image capture and accession linking at the point of digitisation, while Chrysalis turns those images into structured, database-ready records. The goal in both cases is the same — give natural history collections professionals and researchers a way to digitise large batches of specimens quickly and accurately, without sacrificing data quality along the way.
+        """
+ 
+        st.markdown(specimen_digitisation_overview)
+
+        # st.markdown(
+        #     "Digitising biological collections is essential for research and conservation "
+        #     "but remains slow and expensive, particularly for pinned insect specimens with "
+        #     "tiny, stacked labels. Current manual transcription methods in Australia and New "
+        #     "Zealand create a decadal bottleneck, while existing automated systems are costly "
+        #     "and space-intensive. We developed RAPIIDlite (RAked Pinned Insect Imaging Device), "
+        #     "a modular, semi-automated imaging system and associated processing pipeline that "
+        #     "dramatically accelerates specimen digitisation. The system combines customisable "
+        #     "hardware with user-friendly Python software and advanced machine learning. Images "
+        #     "are processed through GoogleVision OCR and spaCy natural language processing to "
+        #     "automatically extract and parse label data into standardised Darwin Core database "
+        #     "fields. Testing shows RAPIIDlite significantly speeds digitisation while improving "
+        #     "standardisation and reducing errors."
+        # )
 
 
 # ---- Tab: View progress by taxa ---------------------------------------------
@@ -280,7 +296,7 @@ with tab_taxa:
                 "Digitised specimens",
                 "Proportion digitised",
             ]
-            st.dataframe(display, hide_index=True, use_container_width=True, height=550)
+            st.dataframe(display, hide_index=True, width='stretch', height=550)
 
 
 # ---- Tab: Maps ---------------------------------------------------------------
@@ -319,4 +335,4 @@ with tab_maps:
         map_style="light",
         tooltip=tooltip,
     )
-    st.pydeck_chart(deck, use_container_width=True, height=600)
+    st.pydeck_chart(deck, width='stretch', height=600)
