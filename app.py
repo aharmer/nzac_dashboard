@@ -212,21 +212,6 @@ with tab_projects:
  
         st.markdown(specimen_digitisation_overview)
 
-        # st.markdown(
-        #     "Digitising biological collections is essential for research and conservation "
-        #     "but remains slow and expensive, particularly for pinned insect specimens with "
-        #     "tiny, stacked labels. Current manual transcription methods in Australia and New "
-        #     "Zealand create a decadal bottleneck, while existing automated systems are costly "
-        #     "and space-intensive. We developed RAPIIDlite (RAked Pinned Insect Imaging Device), "
-        #     "a modular, semi-automated imaging system and associated processing pipeline that "
-        #     "dramatically accelerates specimen digitisation. The system combines customisable "
-        #     "hardware with user-friendly Python software and advanced machine learning. Images "
-        #     "are processed through GoogleVision OCR and spaCy natural language processing to "
-        #     "automatically extract and parse label data into standardised Darwin Core database "
-        #     "fields. Testing shows RAPIIDlite significantly speeds digitisation while improving "
-        #     "standardisation and reducing errors."
-        # )
-
 
 # ---- Tab: View progress by taxa ---------------------------------------------
 
@@ -237,7 +222,7 @@ with tab_taxa:
         "Hymenoptera, Lepidoptera) have information at the family level. Information is not yet "
         "available at the family level for other taxonomic orders, or for specimens stored in "
         "fluid or on microscope slides (this information is presented only at the order level). "
-        "For non-insects, information is a mix at the level of Phyla, Class, or Order."
+        "For non-insects, information is a mix at the level of phylum, class, or order."
     )
 
     filt_col, results_col = st.columns([1, 3])
