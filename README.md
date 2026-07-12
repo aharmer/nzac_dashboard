@@ -1,6 +1,6 @@
 # NZAC Project Dashboard
 
-A [Streamlit](https://streamlit.io/) dashboard summarising digitisation progress and
+A [Streamlit](https://nzac-dashboard.streamlit.app/) dashboard summarising digitisation progress and
 related projects for the [New Zealand Arthropod Collection](https://www.landcareresearch.co.nz/tools-and-resources/collections/new-zealand-arthropod-collection-nzac/)
 (NZAC), held at Manaaki Whenua – Landcare Research.
 
