@@ -201,16 +201,16 @@ with tab_projects:
         Natural history collections hold millions of physical specimens, each carrying handwritten or printed labels that record decades — sometimes centuries — of collecting effort. Turning that locked-away information into searchable, usable digital records has traditionally meant slow, error-prone manual transcription. This project takes on that bottleneck from two complementary angles: capturing better source images, and reading them intelligently.
  
         ### RAPIIDlite — capturing the data at the source
-        RAPIIDlite is a desktop imaging application built for natural history collection digitisation workflows. It captures high-quality images of specimen labels using one or more cameras, decodes DataMatrix barcodes from accession labels on the fly, and automatically logs capture metadata to CSV and EXIF tags. No manual data entry is required at the imaging bench — every specimen is linked to its image and accession number the moment it's photographed.
+        <a href="https://github.com/aharmer/RAPIIDlite" target="_blank">RAPIIDlite</a> is a desktop imaging application built for natural history collection digitisation workflows. It captures high-quality images of specimen labels using one or more cameras, decodes DataMatrix barcodes from accession labels on the fly, and automatically logs capture metadata to CSV and EXIF tags. No manual data entry is required at the imaging bench — every specimen is linked to its image and accession number the moment it's photographed.
  
         ### Chrysalis — reading the labels with AI
-        Chrysalis picks up where imaging leaves off. It's a browser-based tool that uses AI vision to digitise entomological specimen labels: upload images of pinned insect specimens, and Chrysalis automatically reads the labels and parses out locality, collector, date, and other curatorial fields. The result is a clean CSV ready to import straight into a collection management system, with human review built in to catch anything the model gets wrong.
+        <a href="https://chrysalis-ento.vercel.app/" target="_blank">Chrysalis</a> picks up where imaging leaves off. It's a browser-based tool that uses AI vision to digitise entomological specimen labels: upload images of pinned insect specimens, and Chrysalis automatically reads the labels and parses out locality, collector, date, and other curatorial fields. The result is a clean CSV ready to import straight into a collection management system, with human review built in to catch anything the model gets wrong.
  
         ### One workflow, start to finish
         Together, RAPIIDlite and Chrysalis form an end-to-end pipeline for moving physical specimen data into digital form: RAPIIDlite handles fast, accurate image capture and accession linking at the point of digitisation, while Chrysalis turns those images into structured, database-ready records. The goal in both cases is the same — give natural history collections professionals and researchers a way to digitise large batches of specimens quickly and accurately, without sacrificing data quality along the way.
         """
  
-        st.markdown(specimen_digitisation_overview)
+        st.markdown(specimen_digitisation_overview, unsafe_allow_html=True)
 
 
 # ---- Tab: View progress by taxa ---------------------------------------------
