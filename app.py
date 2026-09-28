@@ -192,7 +192,7 @@ with tab_summary:
 # ---- Tab: Digitisation projects ---------------------------------------------
 
 with tab_projects:
-    img_col, text_col = st.columns([2, 3])
+    img_col, text_col = st.columns([2, 4])
     with img_col:
         st.image(str(ASSETS_DIR / "rapiid.png"), width=500)
     with text_col:
