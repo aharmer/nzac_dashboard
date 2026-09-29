@@ -2,3 +2,6 @@ streamlit>=1.38
 pandas>=2.0
 plotly>=5.20
 pydeck>=0.9
+supabase>=2.31
+streamlit-authenticator>=0.4
+openpyxl>=3.1
