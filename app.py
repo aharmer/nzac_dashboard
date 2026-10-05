@@ -491,6 +491,147 @@ def parse_bulk_upload(uploaded_file) -> pd.DataFrame:
     return raw
 
 
+# ---- Names database: transfer / synonymise ----------------------------------
+# A nomenclatural change keeps the old name in the database as a synonym rather
+# than overwriting it, so it can still be looked up. Each change is first built
+# as a "plan" (one item per selected name) that the preview shows, and the same
+# plan is then applied -- so what's shown is exactly what's saved.
+
+AUDIT_COLUMNS = ("id", "created_by", "created_at", "updated_by", "updated_at")
+
+
+def _json_safe(value):
+    """Convert a value read back through pandas into something Supabase can
+    serialise: numpy scalars to Python ones, NaN to None."""
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    return value
+
+
+def _resolve_accepted(name: str, by_part: dict) -> str:
+    """If `name` is itself a synonym, return the name it points to, so new
+    synonyms never point at another synonym."""
+    row = by_part.get(name)
+    if row is not None and not row["is_accepted"] and _s(row.get("accepted_name")):
+        return _s(row["accepted_name"])
+    return name
+
+
+def plan_transfer(selected: pd.DataFrame, new_genus: str, names_df: pd.DataFrame) -> list[dict]:
+    """Plan moving each selected accepted name to `new_genus`. If the resulting
+    name is new it's created as the accepted name; if it already exists the old
+    name is linked to it instead. Either way the old name becomes a synonym."""
+    by_part = {r["part_name"]: r for r in names_df.to_dict("records")}
+    created, plan = set(), []
+    for old in selected.to_dict("records"):
+        old_part = old["part_name"]
+        if not old["is_accepted"]:
+            plan.append({"old": old, "action": "skip", "note": (
+                f"Already a synonym of '{_s(old.get('accepted_name'))}'. Transfer the accepted "
+                "name instead -- its synonyms are updated automatically."
+            )})
+            continue
+        species = _s(old.get("species"))
+        new_part = f"{new_genus} {species}" if species else new_genus
+        if new_part == old_part:
+            plan.append({"old": old, "action": "skip", "note": "Already in this genus."})
+            continue
+        if new_part in by_part or new_part in created:
+            target = _resolve_accepted(new_part, by_part)
+            plan.append({"old": old, "action": "link", "target": target, "note": (
+                f"'{new_part}' already exists, so '{old_part}' becomes a synonym of '{target}'."
+            )})
+            continue
+        if not species:
+            # A genus name can't simply be carried over: a new or replacement genus has
+            # its own author and year, so it has to be entered first.
+            plan.append({"old": old, "action": "skip", "note": (
+                f"The genus '{new_genus}' isn't in the database yet. Add it with its own "
+                f"author and year via 'Add / update a name', then run this again to make "
+                f"'{old_part}' its synonym."
+            )})
+            continue
+
+        original = old_part if old["is_original"] else (_s(old.get("original_name")) or None)
+        is_original = "yes" if new_part == original else "no"
+        part_name, authority_and_year, full_name = compute_derived_fields(
+            new_genus, species, old["authors"], str(old["year_of_publication"]), is_original
+        )
+        new_record = {k: _json_safe(v) for k, v in old.items() if k not in AUDIT_COLUMNS}
+        new_record.update(
+            genus=new_genus,
+            part_name=part_name,
+            authority_and_year=authority_and_year,
+            full_name=full_name,
+            is_accepted=True,
+            accepted_name=part_name,
+            is_original=is_original == "yes",
+            original_name=original,
+        )
+        created.add(part_name)
+        plan.append({"old": old, "action": "create", "target": part_name, "new_record": new_record, "note": (
+            f"New accepted name '{full_name}' is created, and '{old_part}' becomes its synonym."
+        )})
+    return plan
+
+
+def plan_synonymise(selected: pd.DataFrame, target: str, names_df: pd.DataFrame) -> list[dict]:
+    """Plan making each selected name a synonym of an existing accepted name."""
+    by_part = {r["part_name"]: r for r in names_df.to_dict("records")}
+    target = _resolve_accepted(target, by_part)
+    plan = []
+    for old in selected.to_dict("records"):
+        old_part = old["part_name"]
+        if old_part == target:
+            plan.append({"old": old, "action": "skip", "note": "This is the accepted name itself."})
+        elif not old["is_accepted"] and _s(old.get("accepted_name")) == target:
+            plan.append({"old": old, "action": "skip", "note": f"Already a synonym of '{target}'."})
+        else:
+            plan.append({"old": old, "action": "link", "target": target, "note": (
+                f"'{old_part}' becomes a synonym of '{target}'."
+            )})
+    return plan
+
+
+def apply_name_change_plan(client, plan: list[dict], editor_name: str) -> tuple[dict, list[str]]:
+    """Apply a transfer/synonymise plan one name at a time. Returns counts of
+    what was done and a list of per-name failures."""
+    now = datetime.now(timezone.utc).isoformat()
+    stamp = {"updated_by": editor_name, "updated_at": now}
+    done = {"created": 0, "linked": 0}
+    errors = []
+    for item in plan:
+        if item["action"] == "skip":
+            continue
+        old_part, target = item["old"]["part_name"], item["target"]
+        step = "creating the new name"
+        try:
+            if item["action"] == "create":
+                client.table(NAMES_TABLE).insert(
+                    dict(item["new_record"], created_by=editor_name, created_at=now, **stamp)
+                ).execute()
+            step = "marking the old name as a synonym"
+            client.table(NAMES_TABLE).update(
+                {"is_accepted": False, "accepted_name": target, **stamp}
+            ).eq("id", int(item["old"]["id"])).execute()
+            # Synonyms of the old name now point straight to the new accepted name.
+            step = "updating the old name's existing synonyms"
+            client.table(NAMES_TABLE).update({"accepted_name": target, **stamp}).eq(
+                "accepted_name", old_part
+            ).eq("is_accepted", False).execute()
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "code", None) == "23505":
+                reason = f"'{target}' was added by someone else in the meantime"
+            else:
+                reason = str(exc)
+            errors.append(f"'{old_part}': failed while {step} ({reason}).")
+            continue
+        done["created" if item["action"] == "create" else "linked"] += 1
+    return done, errors
+
+
 # ---- Styling (light theme is set in .streamlit/config.toml) -----------------
 
 st.markdown(
@@ -824,7 +965,7 @@ elif active_section == "Names database":
             # doesn't have this problem.
             editor_section = st.radio(
                 "Editor action",
-                ["Add / update a name", "Bulk upload new names", "Bulk edit a group"],
+                ["Add / update a name", "Bulk upload new names", "Bulk edit a group", "Transfer / synonymise"],
                 key="names_editor_section",
                 horizontal=True,
                 label_visibility="collapsed",
@@ -1152,11 +1293,13 @@ elif active_section == "Names database":
             # ---- Bulk edit a group of records ----
             elif editor_section == "Bulk edit a group":
                 st.caption(
-                    "Change one or more fields across many records in one go — e.g. move every "
-                    "species to a new genus after a generic transfer, or add publication details "
-                    "(Authors, Year, Primary reference, Page...) to a batch of names from the same "
-                    "paper. Note: this does not update free-text mentions in AcceptedName, "
-                    "OriginalName, or Taxonomic notes on other records — check those separately."
+                    "Change one or more fields across many records in one go — e.g. fix a misspelt "
+                    "genus, or add publication details (Authors, Year, Primary reference, Page...) "
+                    "to a batch of names from the same paper. Changes here overwrite the old "
+                    "values: for a genuine name change, where the old name should stay in the "
+                    "database as a synonym, use 'Transfer / synonymise' instead. Note: this does "
+                    "not update free-text mentions in AcceptedName, OriginalName, or Taxonomic "
+                    "notes on other records — check those separately."
                 )
 
                 st.markdown("**1. Select the records to edit**")
@@ -1226,7 +1369,8 @@ elif active_section == "Names database":
                         st.error(error)
 
                     confirm_edit = st.checkbox(
-                        f"I understand this will update {len(affected)} record(s).", key="bulk_edit_confirm"
+                        f"I understand this will update {len(affected)} record(s).",
+                        key=f"bulk_edit_confirm_{st.session_state.get('confirm_version', 0)}",
                     )
                     if st.button(
                         "Apply bulk edit",
@@ -1283,11 +1427,119 @@ elif active_section == "Names database":
                         else:
                             result = (True, [f"Updated {len(affected)} record(s)."])
                         st.session_state["names_save_result"] = result
-                        # Untick the confirmation so a second run needs a fresh
-                        # confirmation against the (possibly different) record count.
-                        st.session_state.pop("bulk_edit_confirm", None)
+                        # Untick the confirmation so a second run needs a fresh one against
+                        # the (possibly different) record count. Clearing its session state
+                        # isn't enough -- the browser keeps the tick -- so give it a new key.
+                        st.session_state["confirm_version"] = st.session_state.get("confirm_version", 0) + 1
                         load_names.clear()
                         st.rerun()
+
+            # ---- Transfer / synonymise ----
+            elif editor_section == "Transfer / synonymise":
+                st.caption(
+                    "For name changes where the old name should stay in the database as a synonym, "
+                    "so it can still be looked up — e.g. species moved to another genus, a genus "
+                    "sunk into another, or one species synonymised under another. To correct a "
+                    "mistake (such as a typo) where the old name shouldn't be kept, use 'Bulk edit "
+                    "a group' instead."
+                )
+
+                change_mode = st.radio(
+                    "Type of change",
+                    ["Move to a different genus", "Synonymise under an existing name"],
+                    key="transfer_mode",
+                    horizontal=True,
+                )
+
+                st.markdown("**1. Select the names**")
+                transfer_select = st.radio(
+                    "How to select names",
+                    ["By genus", "By choosing specific names"],
+                    key="transfer_select_mode",
+                    horizontal=True,
+                    label_visibility="collapsed",
+                )
+                if transfer_select == "By genus":
+                    genera = sorted(names_df["genus"].dropna().unique()) if not names_df.empty else []
+                    from_genus = st.selectbox(
+                        "Genus", genera, index=None, placeholder="Select the genus", key="transfer_from_genus"
+                    )
+                    selected = names_df[names_df["genus"] == from_genus] if from_genus else NAMES_EMPTY_DF
+                else:
+                    all_names = sorted(names_df["part_name"].dropna().unique()) if not names_df.empty else []
+                    chosen = st.multiselect("Names", all_names, key="transfer_chosen_names")
+                    selected = names_df[names_df["part_name"].isin(chosen)]
+
+                if not selected.empty:
+                    st.write(f"**{len(selected)}** name(s) selected.")
+
+                    plan = []
+                    if change_mode == "Move to a different genus":
+                        st.markdown("**2. New genus**")
+                        new_genus = st.text_input(
+                            "Genus to move them to",
+                            key="transfer_new_genus",
+                            help="Capitalise the first letter. Family and higher classification are "
+                            "copied from the old names — use 'Bulk edit a group' afterwards if they've "
+                            "changed too.",
+                        ).strip()
+                        if new_genus:
+                            plan = plan_transfer(selected, new_genus, names_df)
+                    else:
+                        st.markdown("**2. Accepted name to synonymise them under**")
+                        accepted_names = sorted(
+                            names_df.loc[names_df["is_accepted"] == True, "part_name"].dropna().unique()  # noqa: E712
+                        )
+                        target_name = st.selectbox(
+                            "Accepted name",
+                            accepted_names,
+                            index=None,
+                            placeholder="Select the accepted name",
+                            key="transfer_target",
+                        )
+                        if target_name:
+                            plan = plan_synonymise(selected, target_name, names_df)
+
+                    if plan:
+                        st.markdown("**3. Review and apply**")
+                        with st.container(height=min(60 + 48 * len(plan), 360)):
+                            for item in plan:
+                                prefix = "**Skipped:** " if item["action"] == "skip" else ""
+                                st.markdown(f"- **{item['old']['part_name']}** — {prefix}{item['note']}")
+                        n_changes = sum(item["action"] != "skip" for item in plan)
+                        confirm_transfer = st.checkbox(
+                            f"I understand this will change {n_changes} name(s).",
+                            key=f"transfer_confirm_{st.session_state.get('confirm_version', 0)}",
+                            disabled=n_changes == 0,
+                        )
+                        if st.button(
+                            "Apply",
+                            disabled=not (n_changes and confirm_transfer),
+                            key="transfer_submit",
+                        ):
+                            done, transfer_errors = apply_name_change_plan(
+                                get_supabase_client(), plan, editor_name
+                            )
+                            summary = []
+                            if done["created"]:
+                                summary.append(
+                                    f"{done['created']} new accepted name(s) created, with the old "
+                                    "names kept as synonyms."
+                                )
+                            if done["linked"]:
+                                summary.append(f"{done['linked']} name(s) made synonyms of existing names.")
+                            if transfer_errors:
+                                n_done = done["created"] + done["linked"]
+                                heading = (
+                                    f"Changed {n_done} of {n_changes} name(s). These were not:"
+                                    if n_done else "Nothing was saved."
+                                )
+                                st.session_state["names_save_result"] = (False, transfer_errors, heading)
+                            else:
+                                st.session_state["names_save_result"] = (True, summary)
+                            st.session_state["confirm_version"] = st.session_state.get("confirm_version", 0) + 1
+                            load_names.clear()
+                            st.rerun()
 
 
 # ---- Tab: Maps ---------------------------------------------------------------

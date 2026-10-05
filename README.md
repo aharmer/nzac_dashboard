@@ -18,9 +18,11 @@ The app has five tabs:
   digitisation progress, with cascading filters for order, family, origin, and
   material type.
 - **Names database** — a publicly viewable, filterable table of accepted names
-  and synonymy for NZ arthropod taxa, with a login-gated form for a small group
-  of curators to add new names or update existing ones as nomenclature changes
-  in the literature. See [Names database setup](#names-database-setup) below.
+  and synonymy for NZ arthropod taxa. A small group of logged-in curators can
+  add or correct names one at a time or in bulk, and record nomenclatural
+  changes (transfers to another genus, synonymies) with "Transfer /
+  synonymise", which keeps the old name as a synonym rather than overwriting it.
+  See [Names database setup](#names-database-setup) below.
 - **Maps** — an interactive map (rendered with [pydeck](https://deckgl.readthedocs.io/))
   plotting all georeferenced specimen localities in the collection.
 
