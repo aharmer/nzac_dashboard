@@ -1,0 +1,50 @@
+name: Names database backup (and Supabase keep-alive)
+
+# Every 3 days: export the Supabase `names` table and commit it to the `backups`
+# branch if it changed. The query itself keeps the free-tier Supabase project
+# from being paused after 7 days of inactivity.
+on:
+  schedule:
+    - cron: "0 18 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install supabase pandas
+
+      - name: Export names table
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/backup_names.py "$RUNNER_TEMP/names.csv"
+
+      - name: Commit snapshot to the backups branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin backups > /dev/null; then
+            git fetch origin backups
+            git checkout backups
+          else
+            git checkout --orphan backups
+            git rm -rf --quiet .
+          fi
+          cp "$RUNNER_TEMP/names.csv" names.csv
+          git add names.csv
+          if git diff --cached --quiet; then
+            echo "No changes since the last snapshot."
+          else
+            git commit -m "Names table snapshot $(date -u +%F)"
+            git push origin backups
+          fi
