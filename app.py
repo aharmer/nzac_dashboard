@@ -236,6 +236,16 @@ def load_names() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.dialog("Save result")
+def show_save_result(ok: bool, messages: list[str], heading: str = "Nothing was saved."):
+    if ok:
+        st.success("\n\n".join(messages))
+    else:
+        st.error(heading + "\n\n" + "\n".join(f"- {m}" for m in messages))
+    if st.button("OK", key="save_result_ok", width="stretch"):
+        st.rerun()
+
+
 def get_authenticator():
     auth_cfg = st.secrets.get("auth")
     if not auth_cfg or "usernames" not in auth_cfg:
@@ -821,6 +831,13 @@ elif active_section == "Names database":
             )
             st.divider()
 
+            # A successful save reruns the script (to reload the table), which
+            # wipes anything shown before it -- so the outcome is stashed in
+            # session state and shown here, after the rerun.
+            pending_result = st.session_state.pop("names_save_result", None)
+            if pending_result:
+                show_save_result(*pending_result)
+
             # ---- Add / update a single name ----
             if editor_section == "Add / update a name":
                 entry_type = st.radio(
@@ -974,7 +991,7 @@ elif active_section == "Names database":
 
                 if submitted:
                     if entry_type == "Update to existing name" and not linked_name:
-                        st.error("Select the existing name to update.")
+                        show_save_result(False, ["Select the existing name to update."])
                     else:
                         record, errors = validate_and_build_record(
                             {
@@ -991,8 +1008,7 @@ elif active_section == "Names database":
                             }
                         )
                         if errors:
-                            for error in errors:
-                                st.error(error)
+                            show_save_result(False, errors)
                         else:
                             now = datetime.now(timezone.utc).isoformat()
                             record["updated_by"] = editor_name
@@ -1002,16 +1018,27 @@ elif active_section == "Names database":
                             try:
                                 if entry_type == "Update to existing name":
                                     client.table(NAMES_TABLE).update(record).eq("part_name", linked_name).execute()
-                                    st.success(f"Updated '{linked_name}'.")
+                                    message = f"Updated '{linked_name}'."
+                                    if record["part_name"] != linked_name:
+                                        message = f"Updated '{linked_name}' (now '{record['part_name']}')."
                                 else:
                                     record["created_by"] = editor_name
                                     record["created_at"] = now
                                     client.table(NAMES_TABLE).insert(record).execute()
-                                    st.success(f"Added '{record['part_name']}'.")
+                                    message = f"Added '{record['part_name']}'."
+                            except Exception as exc:  # noqa: BLE001 - surface any DB error to the editor
+                                if getattr(exc, "code", None) == "23505":  # Postgres unique violation
+                                    reason = (
+                                        f"'{record['part_name']}' is already in the database. To change "
+                                        "it, choose 'Update to existing name' instead."
+                                    )
+                                else:
+                                    reason = f"The database rejected the save: {exc}"
+                                show_save_result(False, [reason])
+                            else:
+                                st.session_state["names_save_result"] = (True, [message])
                                 load_names.clear()
                                 st.rerun()
-                            except Exception as exc:  # noqa: BLE001 - surface any DB error to the editor
-                                st.error(f"Could not save: {exc}")
 
             # ---- Bulk upload new names ----
             elif editor_section == "Bulk upload new names":
@@ -1100,14 +1127,27 @@ elif active_section == "Names database":
                                     for r in records:
                                         r.update(created_by=editor_name, created_at=now,
                                                   updated_by=editor_name, updated_at=now)
+                                    # One multi-row insert is all-or-nothing, so a failure
+                                    # means none of the rows were saved.
                                     try:
                                         get_supabase_client().table(NAMES_TABLE).insert(records).execute()
-                                        st.success(f"Added {len(records)} new name(s).")
+                                    except Exception as exc:  # noqa: BLE001
+                                        if getattr(exc, "code", None) == "23505":  # unique violation
+                                            reason = (
+                                                "At least one of these names is already in the database "
+                                                "(it may have been added since you uploaded the file). "
+                                                "Re-upload the file to see which."
+                                            )
+                                        else:
+                                            reason = f"The database rejected the upload: {exc}"
+                                        show_save_result(False, [reason])
+                                    else:
+                                        st.session_state["names_save_result"] = (
+                                            True, [f"Added {len(records)} new name(s)."]
+                                        )
                                         load_names.clear()
                                         st.session_state.bulk_upload_uploader_version += 1
                                         st.rerun()
-                                    except Exception as exc:  # noqa: BLE001
-                                        st.error(f"Could not save: {exc}")
 
             # ---- Bulk edit a group of records ----
             elif editor_section == "Bulk edit a group":
@@ -1223,12 +1263,29 @@ elif active_section == "Names database":
                             try:
                                 client.table(NAMES_TABLE).update(update).eq("id", row["id"]).execute()
                             except Exception as exc:  # noqa: BLE001
-                                apply_errors.append(f"{row['part_name']}: {exc}")
+                                if getattr(exc, "code", None) == "23505":  # unique violation
+                                    apply_errors.append(
+                                        f"'{row['part_name']}' would become '{update['part_name']}', "
+                                        "which is already in the database."
+                                    )
+                                else:
+                                    apply_errors.append(f"'{row['part_name']}': {exc}")
 
+                        # Records are updated one at a time, so some can succeed while
+                        # others fail -- report exactly how many went through.
+                        n_ok = len(affected) - len(apply_errors)
                         if apply_errors:
-                            st.error("Some records failed to update:\n" + "\n".join(apply_errors))
+                            heading = (
+                                f"Updated {n_ok} of {len(affected)} record(s). These were not:"
+                                if n_ok else "Nothing was saved."
+                            )
+                            result = (False, apply_errors, heading)
                         else:
-                            st.success(f"Updated {len(affected)} record(s).")
+                            result = (True, [f"Updated {len(affected)} record(s)."])
+                        st.session_state["names_save_result"] = result
+                        # Untick the confirmation so a second run needs a fresh
+                        # confirmation against the (possibly different) record count.
+                        st.session_state.pop("bulk_edit_confirm", None)
                         load_names.clear()
                         st.rerun()
 
