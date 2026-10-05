@@ -215,12 +215,25 @@ def get_supabase_client() -> Client:
     return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 
 
+SUPABASE_PAGE_SIZE = 1000  # Supabase caps rows per request; page past it
+
+
 @st.cache_data(ttl=300)
 def load_names() -> pd.DataFrame:
-    response = get_supabase_client().table(NAMES_TABLE).select("*").order("part_name").execute()
-    if not response.data:
+    client = get_supabase_client()
+    rows, start = [], 0
+    while True:
+        page = (
+            client.table(NAMES_TABLE).select("*").order("part_name")
+            .range(start, start + SUPABASE_PAGE_SIZE - 1).execute().data
+        )
+        rows.extend(page)
+        if len(page) < SUPABASE_PAGE_SIZE:
+            break
+        start += SUPABASE_PAGE_SIZE
+    if not rows:
         return NAMES_EMPTY_DF.copy()
-    return pd.DataFrame(response.data)
+    return pd.DataFrame(rows)
 
 
 def get_authenticator():
