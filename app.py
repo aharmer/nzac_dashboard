@@ -200,7 +200,10 @@ def load_data():
 
     summary_tab = pd.read_csv(DATA_DIR / "summary_table.csv", skipinitialspace=True)
     for col in ["Holdings", "Digitised"]:
-        summary_tab[col] = summary_tab[col].astype(str).str.strip().str.replace(",", "").astype(int).map("{:,}".format)
+        summary_tab[col] = summary_tab[col].astype(str).str.strip().str.replace(",", "").astype(int)
+    summary_tab["Proportion Digitised"] = (
+        summary_tab["Proportion Digitised"].astype(str).str.strip().str.rstrip("%").astype(float)
+    )
 
     return dat, loc, prog, summary_tab
 
@@ -715,15 +718,15 @@ st.divider()
 
 if active_section == "Summary":
     total_row = summary_tab.loc[summary_tab["Material type"] == "Total"].iloc[0]
-    total_dig = int(str(total_row["Digitised"]).replace(",", ""))
-    pct_dig = int(str(total_row["Proportion Digitised"]).replace("%", ""))
+    total_dig = int(total_row["Digitised"])
+    pct_dig = total_row["Proportion Digitised"]
     total_imaged = 3307
 
     k1, k2, k3 = st.columns(3)
     with k1:
         kpi_box(f"{total_dig:,}", "Specimens digitised")
     with k2:
-        kpi_box(f"{pct_dig}%", "Of collection digitised")
+        kpi_box(f"{pct_dig:.0f}%", "Of collection digitised")
     with k3:
         kpi_box(f"{total_imaged:,}", "Specimens imaged")
 
@@ -782,7 +785,17 @@ if active_section == "Summary":
         st.plotly_chart(fig, width='stretch')
 
     with table_col:
-        st.dataframe(summary_tab, hide_index=True, width='stretch', height=200)
+        st.dataframe(
+            summary_tab,
+            hide_index=True,
+            width='stretch',
+            height=200,
+            column_config={
+                "Holdings": st.column_config.NumberColumn(format="localized"),
+                "Digitised": st.column_config.NumberColumn(format="localized"),
+                "Proportion Digitised": st.column_config.NumberColumn(format="%.0f%%"),
+            },
+        )
 
     st.markdown(
         'Created and maintained by <a href="https://www.landcareresearch.co.nz/about-us/our-people/aaron-harmer" '
@@ -873,7 +886,7 @@ elif active_section == "Digitisation progress by taxa":
             display = filtered[
                 ["order", "family", "preservation", "origin", "inventory", "digitised", "proportion"]
             ].copy()
-            display["proportion"] = (display["proportion"] * 100).round(0).astype(int).astype(str) + "%"
+            display["proportion"] = display["proportion"] * 100
             display.columns = [
                 "Order",
                 "Family",
@@ -883,7 +896,13 @@ elif active_section == "Digitisation progress by taxa":
                 "Digitised specimens",
                 "Proportion digitised",
             ]
-            st.dataframe(display, hide_index=True, width='stretch', height=550)
+            st.dataframe(
+                display,
+                hide_index=True,
+                width='stretch',
+                height=550,
+                column_config={"Proportion digitised": st.column_config.NumberColumn(format="%.0f%%")},
+            )
 
 
 # ---- Tab: Names database -----------------------------------------------------
