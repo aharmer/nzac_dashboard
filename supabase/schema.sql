@@ -63,3 +63,8 @@ create unique index if not exists names_part_name_key on names (part_name);
 alter table names enable row level security;
 -- No policies defined: only the service-role key (used server-side by the app)
 -- can read/write. The anon/public key gets nothing.
+
+-- Newer Supabase projects no longer give the API roles access to tables created
+-- in the SQL Editor, so grant it explicitly -- to the service role only.
+grant select, insert, update, delete on table names to service_role;
+grant usage, select on sequence names_id_seq to service_role;
